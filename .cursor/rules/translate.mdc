@@ -1,0 +1,27 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+
+## 对链接内容进行翻译
+
+你需要1比1的对链接内容进行翻译，然后把翻译内容的markdown格式，整理并创建成一个markdown文件。
+
+* 对于图片文件，需要引用，引用地址为原文中的链接地址
+* 对应链接，需要引用，引用地址为原文中的链接地址
+
+处理链接地址时要注意：
+* 如果是个完整的http链接，那么直接使用即可
+* 如果不是，那么根据当前的网站地址，解析成一个完整的http链接，进行使用
+
+markdown文件的目录要求：
+按照页面的路由进行拆分，并当做文件目录。
+
+比如：
+页面地址为：https://modelcontextprotocol.io/docs/tools/inspector
+我的目录结构及文件名为：
+|- modelcontextprotocol.io
+  |- docs
+    |- tools
+      |- inspector.md

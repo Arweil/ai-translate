@@ -1,0 +1,248 @@
+# 资源
+
+向LLM公开服务器的数据和内容
+
+资源是模型上下文协议（Model Context Protocol，MCP）中的一个核心原语，它允许服务器公开可被客户端读取并用作LLM交互上下文的数据和内容。
+
+资源被设计为**应用程序控制**的，这意味着客户端应用程序可以决定如何以及何时使用它们。不同的MCP客户端可能会以不同方式处理资源。例如：
+
+* Claude Desktop目前要求用户在使用资源之前明确选择它们
+* 其他客户端可能会基于启发式规则自动选择资源
+* 某些实现甚至可能允许AI模型自行决定使用哪些资源
+
+在实现资源支持时，服务器作者应该准备好处理任何这些交互模式。为了自动向模型公开数据，服务器作者应该使用**模型控制**的原语，如工具（Tools）。
+
+## 概述
+
+资源代表MCP服务器想要提供给客户端的任何类型的数据。这可以包括：
+
+* 文件内容
+* 数据库记录
+* API响应
+* 实时系统数据
+* 截图和图片
+* 日志文件
+* 等等
+
+每个资源都由唯一的URI标识，可以包含文本或二进制数据。
+
+## 资源URI
+
+资源使用以下格式的URI进行标识：
+
+```
+[protocol]://[host]/[path]
+```
+
+例如：
+
+* `file:///home/user/documents/report.pdf`
+* `postgres://database/customers/schema`
+* `screen://localhost/display1`
+
+协议和路径结构由MCP服务器实现定义。服务器可以定义自己的自定义URI方案。
+
+## 资源类型
+
+资源可以包含两种类型的内容：
+
+### 文本资源
+
+文本资源包含UTF-8编码的文本数据。这些适用于：
+
+* 源代码
+* 配置文件
+* 日志文件
+* JSON/XML数据
+* 纯文本
+
+### 二进制资源
+
+二进制资源包含base64编码的原始二进制数据。这些适用于：
+
+* 图片
+* PDF文件
+* 音频文件
+* 视频文件
+* 其他非文本格式
+
+## 资源发现
+
+客户端可以通过两种主要方法发现可用资源：
+
+### 直接资源
+
+服务器通过`resources/list`端点公开具体资源列表。每个资源包括：
+
+```typescript
+{
+  uri: string;           // 资源的唯一标识符
+  name: string;          // 人类可读的名称
+  description?: string;  // 可选的描述
+  mimeType?: string;     // 可选的MIME类型
+}
+```
+
+### 资源模板
+
+对于动态资源，服务器可以公开URI模板，客户端可以使用这些模板构造有效的资源URI：
+
+```typescript
+{
+  uriTemplate: string;   // 遵循RFC 6570的URI模板
+  name: string;          // 此类型的人类可读名称
+  description?: string;  // 可选的描述
+  mimeType?: string;     // 所有匹配资源的可选MIME类型
+}
+```
+
+## 读取资源
+
+要读取资源，客户端需要使用资源URI发出`resources/read`请求。
+
+服务器响应包含资源内容列表：
+
+```typescript
+{
+  contents: [
+    {
+      uri: string;        // 资源的URI
+      mimeType?: string;  // 可选的MIME类型
+
+      // 以下二选一：
+      text?: string;      // 用于文本资源
+      blob?: string;      // 用于二进制资源（base64编码）
+    }
+  ]
+}
+```
+
+服务器可能会对一个`resources/read`请求返回多个资源。例如，当读取目录时，可以返回该目录内的文件列表。
+
+## 资源更新
+
+MCP通过两种机制支持资源的实时更新：
+
+### 列表变更
+
+服务器可以通过`notifications/resources/list_changed`通知来告知客户端其可用资源列表发生了变化。
+
+### 内容变更
+
+客户端可以订阅特定资源的更新：
+
+1. 客户端使用资源URI发送`resources/subscribe`
+2. 当资源发生变化时，服务器发送`notifications/resources/updated`
+3. 客户端可以使用`resources/read`获取最新内容
+4. 客户端可以使用`resources/unsubscribe`取消订阅
+
+## 实现示例
+
+这是在MCP服务器中实现资源支持的简单示例：
+
+* TypeScript
+* Python
+
+```typescript
+const server = new Server({
+  name: "example-server",
+  version: "1.0.0"
+}, {
+  capabilities: {
+    resources: {}
+  }
+});
+
+// 列出可用资源
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  return {
+    resources: [
+      {
+        uri: "file:///logs/app.log",
+        name: "应用程序日志",
+        mimeType: "text/plain"
+      }
+    ]
+  };
+});
+
+// 读取资源内容
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const uri = request.params.uri;
+
+  if (uri === "file:///logs/app.log") {
+    const logContents = await readLogFile();
+    return {
+      contents: [
+        {
+          uri,
+          mimeType: "text/plain",
+          text: logContents
+        }
+      ]
+    };
+  }
+
+  throw new Error("未找到资源");
+});
+```
+
+```python
+app = Server("example-server")
+
+@app.list_resources()
+async def list_resources() -> list[types.Resource]:
+    return [
+        types.Resource(
+            uri="file:///logs/app.log",
+            name="Application Logs",
+            mimeType="text/plain"
+        )
+    ]
+
+@app.read_resource()
+async def read_resource(uri: AnyUrl) -> str:
+    if str(uri) == "file:///logs/app.log":
+        log_contents = await read_log_file()
+        return log_contents
+
+    raise ValueError("Resource not found")
+
+# Start server
+async with stdio_server() as streams:
+    await app.run(
+        streams[0],
+        streams[1],
+        app.create_initialization_options()
+    )
+```
+
+## 最佳实践
+
+在实现资源支持时：
+
+1. 使用清晰、描述性的资源名称和URI
+2. 包含有助于LLM理解的描述
+3. 在已知时设置适当的MIME类型
+4. 为动态内容实现资源模板
+5. 对频繁变化的资源使用订阅
+6. 使用清晰的错误消息优雅地处理错误
+7. 考虑大型资源列表的分页
+8. 在适当时缓存资源内容
+9. 在处理之前验证URI
+10. 记录您的自定义URI方案
+
+## 安全注意事项
+
+在公开资源时：
+
+* 验证所有资源URI
+* 实现适当的访问控制
+* 净化文件路径以防止目录遍历
+* 谨慎处理二进制数据
+* 考虑资源读取的速率限制
+* 审计资源访问
+* 加密传输中的敏感数据
+* 验证MIME类型
+* 为长时间运行的读取实现超时
+* 适当处理资源清理
